@@ -105,6 +105,13 @@ const STRUCTURAL_RULES = {
   postSafetyFactor: 2.0,
 };
 
+export interface BuildPergolaOptions {
+  /** Override the default roof load (kPa) for snow/wind scenarios. */
+  roofLoadKPa?: number;
+  /** Multiplier applied to the post safety factor for lateral load. */
+  lateralFactor?: number;
+}
+
 export const SIZE_PRESETS: PergolaSizePreset[] = [
   { id: 'compact', label: 'Compact 3x3m', width: 3, depth: 3, height: 2.5 },
   { id: 'urban', label: 'Urban 3x4m', width: 3, depth: 4, height: 2.6 },
@@ -207,10 +214,11 @@ const designBeamSection = (
   minBeamWidthM: number,
   elasticModulusPa: number,
   allowableStressPa: number,
+  roofLoadKPa: number,
 ): BeamSectionDesign => {
   const span = Math.max(spanM, 0.2);
   const tributary = Math.max(tributaryWidthM, 0.2);
-  const lineLoadNPerM = STRUCTURAL_RULES.roofLoadKPa * 1000 * tributary;
+  const lineLoadNPerM = roofLoadKPa * 1000 * tributary;
 
   const maxMomentNm = (lineLoadNPerM * span * span) / 8;
   const allowableDeflectionM = span / STRUCTURAL_RULES.deflectionLimitRatio;
@@ -254,6 +262,8 @@ const resolveStructuralSystem = (
   minPostThicknessM: number,
   minBeamWidthM: number,
   materialPreset: MaterialPreset,
+  roofLoadKPa: number,
+  lateralFactor: number,
 ): StructuralSystem => {
   const width = dimensions.width;
   const depth = dimensions.depth;
@@ -280,8 +290,8 @@ const resolveStructuralSystem = (
     const spanX = Math.max(0.4, (width - minPostThicknessM) / bayCountX);
     const spanZ = Math.max(0.4, (depth - minPostThicknessM) / bayCountZ);
 
-    sectionX = designBeamSection(spanX, spanZ, minBeamWidthM, elasticModulusPa, allowableStressPa);
-    sectionZ = designBeamSection(spanZ, spanX, minBeamWidthM, elasticModulusPa, allowableStressPa);
+    sectionX = designBeamSection(spanX, spanZ, minBeamWidthM, elasticModulusPa, allowableStressPa, roofLoadKPa);
+    sectionZ = designBeamSection(spanZ, spanX, minBeamWidthM, elasticModulusPa, allowableStressPa, roofLoadKPa);
 
     const requiredBeamWidth = Math.max(sectionX.width, sectionZ.width, minBeamWidthM);
     const requiredBeamDepth = Math.max(
@@ -320,8 +330,8 @@ const resolveStructuralSystem = (
   const spanX = Math.max(0.4, (width - minPostThicknessM) / bayCountX);
   const spanZ = Math.max(0.4, (depth - minPostThicknessM) / bayCountZ);
 
-  sectionX = designBeamSection(spanX, spanZ, minBeamWidthM, elasticModulusPa, allowableStressPa);
-  sectionZ = designBeamSection(spanZ, spanX, minBeamWidthM, elasticModulusPa, allowableStressPa);
+  sectionX = designBeamSection(spanX, spanZ, minBeamWidthM, elasticModulusPa, allowableStressPa, roofLoadKPa);
+  sectionZ = designBeamSection(spanZ, spanX, minBeamWidthM, elasticModulusPa, allowableStressPa, roofLoadKPa);
 
   const beamWidth = clamp(
     Math.max(sectionX.width, sectionZ.width, minBeamWidthM),
@@ -336,15 +346,16 @@ const resolveStructuralSystem = (
   );
 
   const tributaryAreaPerPost = spanX * spanZ;
-  const postLoadN = STRUCTURAL_RULES.roofLoadKPa * 1000 * tributaryAreaPerPost;
+  const postLoadN = roofLoadKPa * 1000 * tributaryAreaPerPost;
 
+  const lateralAdjustedSafety = STRUCTURAL_RULES.postSafetyFactor * lateralFactor;
   const allowableCompressionPa = Math.max(allowableStressPa * 0.35, 2_000_000);
   const postByCompression = Math.sqrt(
-    (postLoadN * STRUCTURAL_RULES.postSafetyFactor) / allowableCompressionPa,
+    (postLoadN * lateralAdjustedSafety) / allowableCompressionPa,
   );
 
   const postByBuckling = Math.pow(
-    (12 * postLoadN * STRUCTURAL_RULES.postSafetyFactor * Math.pow(Math.max(height, 2), 2)) /
+    (12 * postLoadN * lateralAdjustedSafety * Math.pow(Math.max(height, 2), 2)) /
       (Math.PI * Math.PI * Math.max(elasticModulusPa, 1e7)),
     0.25,
   );
@@ -388,6 +399,7 @@ export const buildPergolaModel = (
   dimensions: PergolaDimensions,
   params: PergolaParameters,
   materialPreset?: MaterialPreset,
+  options: BuildPergolaOptions = {},
 ): PergolaModel => {
   const width = clamp(dimensions.width, 2.5, 9);
   const depth = clamp(dimensions.depth, 2.5, 10);
@@ -400,11 +412,16 @@ export const buildPergolaModel = (
   const slatThickness = clamp(params.slatThickness, 0.02, 0.12);
   const slatSpacing = clamp(params.slatSpacing, 0.12, 0.5);
 
+  const roofLoadKPa = options.roofLoadKPa ?? STRUCTURAL_RULES.roofLoadKPa;
+  const lateralFactor = options.lateralFactor ?? 1;
+
   const structural = resolveStructuralSystem(
     { width, depth, height },
     minPostThickness,
     minBeamWidth,
     activeMaterial,
+    roofLoadKPa,
+    lateralFactor,
   );
 
   const postThickness = structural.postThickness;
@@ -560,7 +577,7 @@ export const buildPergolaModel = (
       beamDepthM: beamDepth,
       postThicknessM: postThickness,
       maxClearSpanM: Math.max(structural.spanX, structural.spanZ),
-      designLoadKPa: STRUCTURAL_RULES.roofLoadKPa,
+      designLoadKPa: roofLoadKPa,
       structuralUtilizationPct: clamp(structural.governingUtilization * 100, 0, 220),
       frameVolumeM3,
       estimatedWeightKg,

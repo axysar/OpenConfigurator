@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import {
   buildPergolaModel,
+  type BuildPergolaOptions,
   type MaterialPreset,
   type PergolaDimensions,
   type PergolaParameters,
@@ -12,6 +13,7 @@ interface ParametricPergolaProps {
   parameters: PergolaParameters;
   materialPreset: MaterialPreset;
   texture: THREE.Texture | null;
+  buildOptions?: BuildPergolaOptions;
 }
 
 const materialFrom = (
@@ -41,10 +43,11 @@ export const ParametricPergola = ({
   parameters,
   materialPreset,
   texture,
+  buildOptions,
 }: ParametricPergolaProps): JSX.Element => {
   const model = useMemo(
-    () => buildPergolaModel(dimensions, parameters, materialPreset),
-    [dimensions, materialPreset, parameters],
+    () => buildPergolaModel(dimensions, parameters, materialPreset, buildOptions),
+    [dimensions, materialPreset, parameters, buildOptions],
   );
 
   const frameMaterial = useMemo(

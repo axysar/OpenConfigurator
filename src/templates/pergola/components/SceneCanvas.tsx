@@ -6,6 +6,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { createPresetTexture } from '../lib/textureFactory';
 import { createGrassTexture } from '../lib/groundTexture';
 import {
+  type BuildPergolaOptions,
   type MaterialPreset,
   type ModelMode,
   type PergolaDimensions,
@@ -15,41 +16,111 @@ import {
 import { ParametricPergola } from './ParametricPergola';
 import { SamplePergola } from './SamplePergola';
 
+export type ViewPreset = 'orbit' | 'front' | 'side' | 'top';
+
+export interface SceneCaptureHandle {
+  takeScreenshot: () => string | null;
+  setViewPreset: (preset: ViewPreset) => void;
+}
+
 interface SceneCanvasProps {
   mode: ModelMode;
   dimensions: PergolaDimensions;
   parameters: PergolaParameters;
   materialPreset: MaterialPreset;
   texturePreset: TexturePreset;
+  buildOptions?: BuildPergolaOptions;
+  viewPreset?: ViewPreset;
+  captureRef?: RefObject<SceneCaptureHandle>;
 }
 
 interface CameraFitProps {
   dimensions: PergolaDimensions;
   controlsRef: RefObject<OrbitControlsImpl | null>;
+  viewPreset: ViewPreset;
 }
 
-const CameraFit = ({ dimensions, controlsRef }: CameraFitProps): null => {
+const positionForPreset = (
+  preset: ViewPreset,
+  dimensions: PergolaDimensions,
+): { position: [number, number, number]; targetY: number } => {
+  const maxPlanSize = Math.max(dimensions.width, dimensions.depth);
+  const distance = maxPlanSize * 1.6 + dimensions.height * 1.45;
+  const targetY = dimensions.height * 0.42;
+  const cameraHeight = Math.max(3.2, dimensions.height * 1.45);
+
+  switch (preset) {
+    case 'front':
+      return { position: [0, dimensions.height * 0.55, distance], targetY };
+    case 'side':
+      return { position: [distance, dimensions.height * 0.55, 0], targetY };
+    case 'top':
+      return { position: [0.0001, distance * 1.4, 0.0001], targetY: 0 };
+    case 'orbit':
+    default:
+      return { position: [distance, cameraHeight, distance], targetY };
+  }
+};
+
+const CameraFit = ({ dimensions, controlsRef, viewPreset }: CameraFitProps): null => {
   const { camera } = useThree();
 
   useEffect(() => {
+    const { position, targetY } = positionForPreset(viewPreset, dimensions);
     const maxPlanSize = Math.max(dimensions.width, dimensions.depth);
     const distance = maxPlanSize * 1.6 + dimensions.height * 1.45;
-    const height = Math.max(3.2, dimensions.height * 1.45);
-    const targetY = dimensions.height * 0.42;
 
-    camera.position.set(distance, height, distance);
+    camera.position.set(...position);
     camera.lookAt(0, targetY, 0);
     camera.near = 0.1;
-    camera.far = 120;
+    camera.far = 200;
     camera.updateProjectionMatrix();
 
     if (controlsRef.current) {
       controlsRef.current.target.set(0, targetY, 0);
       controlsRef.current.minDistance = Math.max(2.8, maxPlanSize * 0.7);
-      controlsRef.current.maxDistance = distance * 2.4;
+      controlsRef.current.maxDistance = distance * 3.4;
       controlsRef.current.update();
     }
-  }, [camera, controlsRef, dimensions.depth, dimensions.height, dimensions.width]);
+  }, [camera, controlsRef, dimensions, viewPreset]);
+
+  return null;
+};
+
+interface CaptureBridgeProps {
+  captureRef: RefObject<SceneCaptureHandle>;
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  dimensions: PergolaDimensions;
+}
+
+const CaptureBridge = ({ captureRef, controlsRef, dimensions }: CaptureBridgeProps): null => {
+  const { gl, scene, camera, invalidate } = useThree();
+
+  useEffect(() => {
+    if (!captureRef) return;
+    const handle: SceneCaptureHandle = {
+      takeScreenshot(): string | null {
+        try {
+          gl.render(scene, camera);
+          return gl.domElement.toDataURL('image/png');
+        } catch {
+          return null;
+        }
+      },
+      setViewPreset(preset: ViewPreset): void {
+        const { position, targetY } = positionForPreset(preset, dimensions);
+        camera.position.set(...position);
+        camera.lookAt(0, targetY, 0);
+        camera.updateProjectionMatrix();
+        if (controlsRef.current) {
+          controlsRef.current.target.set(0, targetY, 0);
+          controlsRef.current.update();
+        }
+        invalidate();
+      },
+    };
+    (captureRef as { current: SceneCaptureHandle | null }).current = handle;
+  }, [captureRef, controlsRef, gl, scene, camera, dimensions, invalidate]);
 
   return null;
 };
@@ -74,6 +145,9 @@ export const SceneCanvas = ({
   parameters,
   materialPreset,
   texturePreset,
+  buildOptions,
+  viewPreset = 'orbit',
+  captureRef,
 }: SceneCanvasProps): JSX.Element => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
@@ -114,7 +188,12 @@ export const SceneCanvas = ({
       performance={{ min: 0.7 }}
       shadows
       camera={{ position: [8, 4.2, 8], fov: 42, near: 0.1, far: 120 }}
-      gl={{ antialias: false, alpha: true, powerPreference: 'high-performance' }}
+      gl={{
+        antialias: true,
+        alpha: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'high-performance',
+      }}
     >
       <color attach="background" args={['#b8d6ff']} />
       <fog attach="fog" args={['#b8d6ff', 28, 95]} />
@@ -160,6 +239,7 @@ export const SceneCanvas = ({
             parameters={parameters}
             materialPreset={materialPreset}
             texture={frameTexture}
+            buildOptions={buildOptions}
           />
         )}
 
@@ -178,14 +258,17 @@ export const SceneCanvas = ({
         />
       </Suspense>
 
-      <CameraFit dimensions={dimensions} controlsRef={controlsRef} />
+      <CameraFit dimensions={dimensions} controlsRef={controlsRef} viewPreset={viewPreset} />
+      {captureRef ? (
+        <CaptureBridge captureRef={captureRef} controlsRef={controlsRef} dimensions={dimensions} />
+      ) : null}
 
       <OrbitControls
         ref={controlsRef}
         enablePan={false}
         enableDamping
         dampingFactor={0.09}
-        minPolarAngle={0.25}
+        minPolarAngle={0.05}
         maxPolarAngle={Math.PI / 2.05}
       />
     </Canvas>
