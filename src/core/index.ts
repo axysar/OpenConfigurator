@@ -10,3 +10,5 @@ export * from './usePerformanceMonitor';
 export * from './onboarding';
 export { LeadCaptureForm, type LeadFormData } from './LeadCaptureForm';
 export { SceneA11y } from './SceneA11y';
+export { ErrorBoundary } from './ErrorBoundary';
+export { LoadingScreen } from './LoadingScreen';

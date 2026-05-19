@@ -1,0 +1,10 @@
+{
+  "name": "OpenConfigurator",
+  "short_name": "Configurator",
+  "description": "Open-source 3D product configurator platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#091326",
+  "theme_color": "#091326",
+  "icons": []
+}
