@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useTheme, useI18n, SUPPORTED_LOCALES, type Locale } from '@core/index';
+import { Suspense, useMemo, useState } from 'react';
+import { useTheme, useI18n, LoadingScreen, SUPPORTED_LOCALES, type Locale } from '@core/index';
 import { DEFAULT_TEMPLATE_ID, TEMPLATE_REGISTRY, getTemplateById } from './templates/registry';
 
 export default function App(): JSX.Element {
@@ -65,7 +65,9 @@ export default function App(): JSX.Element {
       </header>
 
       <main className="oc-template-host">
-        <ActiveTemplateComponent />
+        <Suspense fallback={<LoadingScreen />}>
+          <ActiveTemplateComponent />
+        </Suspense>
       </main>
     </div>
   );

@@ -8,6 +8,7 @@ import {
   buildKitchenModel,
   type KitchenSpec,
 } from './lib/kitchenMath';
+import { KitchenScene } from './components/KitchenScene';
 
 interface RangeProps {
   label: string;
@@ -51,14 +52,8 @@ export default function KitchenTemplate(): JSX.Element {
       <div className="ambient-orb ambient-orb-right" />
       <div className="grain-layer" />
 
-      <div className="scene-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-          <h2 style={{ color: 'var(--text-primary)', marginBottom: 8 }}>Kitchen 3D Preview</h2>
-          <p>{model.metrics.totalUnits} cabinets • {fmtMeters(model.metrics.linearMeters)} run</p>
-          <p style={{ fontSize: '0.74rem', marginTop: 8 }}>
-            3D scene uses the same InstancedMesh renderer — add a SceneCanvas when ready.
-          </p>
-        </div>
+      <div className="scene-container">
+        <KitchenScene spec={spec} />
       </div>
 
       <aside className="panel-wrap">
