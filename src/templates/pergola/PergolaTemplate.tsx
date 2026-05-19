@@ -1,5 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useHistoryState, useKeyboardShortcuts } from '@core/index';
+import {
+  useHistoryState,
+  useKeyboardShortcuts,
+  useI18n,
+  embedApi,
+  evaluateRules,
+  applyRuleResults,
+  trackStepViewed,
+  trackOptionChanged,
+  trackQuoteViewed,
+  trackExport,
+  trackShareLink,
+  trackLeadSubmitted,
+  trackViewPresetChanged,
+  trackRuleTriggered,
+  LeadCaptureForm,
+} from '@core/index';
 import {
   fmtArea,
   fmtCurrency,
@@ -47,6 +63,7 @@ import {
   removeSavedConfig,
   type SavedConfig,
 } from './lib/persistence';
+import { PERGOLA_RULES } from './lib/pergolaRules';
 
 const DIMENSION_LIMITS = {
   width: [2.5, 9] as const,
@@ -54,12 +71,12 @@ const DIMENSION_LIMITS = {
   height: [2.2, 4] as const,
 };
 
-const STEPS: Array<{ id: string; label: string }> = [
-  { id: 'model', label: 'Model & Size' },
-  { id: 'material', label: 'Materials' },
-  { id: 'structure', label: 'Structure' },
-  { id: 'engineering', label: 'Engineering' },
-  { id: 'quote', label: 'Quote & Export' },
+const STEPS: Array<{ id: string; tKey: string }> = [
+  { id: 'model', tKey: 'pergola.step.model' },
+  { id: 'material', tKey: 'pergola.step.material' },
+  { id: 'structure', tKey: 'pergola.step.structure' },
+  { id: 'engineering', tKey: 'pergola.step.engineering' },
+  { id: 'quote', tKey: 'pergola.step.quote' },
 ];
 
 interface RangeControlProps {
@@ -116,6 +133,7 @@ const computeInitialSpec = (): PergolaSpec => {
 };
 
 export default function PergolaTemplate(): JSX.Element {
+  const { t } = useI18n();
   const initialSpec = useMemo(computeInitialSpec, []);
   const history = useHistoryState<PergolaSpec>(initialSpec);
   const spec = history.state;
@@ -124,7 +142,27 @@ export default function PergolaTemplate(): JSX.Element {
   const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>(() => loadSavedConfigs());
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [viewPreset, setViewPreset] = useState<ViewPreset>('orbit');
+  const [showDimensions, setShowDimensions] = useState(false);
   const captureRef = useRef<SceneCaptureHandle | null>(null);
+
+  // ----- Rules engine -----
+  const ruleResult = useMemo(
+    () => evaluateRules(PERGOLA_RULES, spec as unknown as Record<string, unknown>),
+    [spec],
+  );
+
+  useEffect(() => {
+    const patched = applyRuleResults(
+      spec as unknown as Record<string, unknown>,
+      ruleResult,
+    ) as unknown as PergolaSpec;
+    if (JSON.stringify(patched) !== JSON.stringify(spec)) {
+      history.replace(patched);
+    }
+    for (const warning of ruleResult.warnings) {
+      trackRuleTriggered('auto', warning);
+    }
+  }, [ruleResult, spec, history]);
 
   // ----- Persistence: hash + localStorage -----
   useEffect(() => {
@@ -144,6 +182,30 @@ export default function PergolaTemplate(): JSX.Element {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, [history]);
+
+  // ----- Embed API bridge -----
+  useEffect(() => {
+    if (!embedApi.isEmbedded) return;
+    embedApi.emit('oc:specChanged', { spec });
+  }, [spec]);
+
+  useEffect(() => {
+    const unsubs = [
+      embedApi.on('oc:setSpec', (data) => {
+        const incoming = sanitizePergolaSpec(data.spec);
+        history.reset(incoming);
+      }),
+      embedApi.on('oc:getSpec', () => {
+        embedApi.emit('oc:specResponse', { spec });
+      }),
+    ];
+    return () => unsubs.forEach((fn) => fn());
+  }, [spec, history]);
+
+  // ----- Analytics: step tracking -----
+  useEffect(() => {
+    trackStepViewed(activeStep);
+  }, [activeStep]);
 
   // ----- Derived selectors -----
   const activeSizePreset = useMemo(() => getSizePreset(spec.sizeId), [spec.sizeId]);
@@ -174,6 +236,13 @@ export default function PergolaTemplate(): JSX.Element {
 
   const bom = useMemo(() => buildPergolaBom(model), [model]);
 
+  // Track quote when step is active
+  useEffect(() => {
+    if (activeStep === 'quote') {
+      trackQuoteViewed(quote.total, 'USD');
+    }
+  }, [activeStep, quote.total]);
+
   // ----- Mutators -----
   const updateSpec = useCallback(
     (mutator: (current: PergolaSpec) => PergolaSpec) => {
@@ -185,6 +254,7 @@ export default function PergolaTemplate(): JSX.Element {
   const applyPreset = useCallback(
     (id: PergolaSpec['sizeId']) => {
       const preset = getSizePreset(id);
+      trackOptionChanged('sizeId', id);
       updateSpec((current) => ({
         ...current,
         sizeId: id,
@@ -220,7 +290,7 @@ export default function PergolaTemplate(): JSX.Element {
     [updateSpec],
   );
 
-  // ----- Save / Load slots -----
+  // ----- Save / Load -----
   const saveCurrentConfig = useCallback(() => {
     if (typeof window === 'undefined') return;
     const name = window.prompt('Name this configuration', `${activeSizePreset.label} • ${materialPreset.label}`);
@@ -240,48 +310,66 @@ export default function PergolaTemplate(): JSX.Element {
     setSavedConfigs(removeSavedConfig(id));
   }, []);
 
-  // ----- Export actions -----
+  // ----- Exports -----
   const handleExportJson = useCallback(() => {
+    trackExport('json');
     downloadJson({ spec, metrics: model.metrics, quote }, `pergola-${Date.now()}.json`);
   }, [spec, model.metrics, quote]);
 
   const handleExportCsv = useCallback(() => {
+    trackExport('csv');
     downloadCsv(bomToCsv(bom), `pergola-bom-${Date.now()}.csv`);
   }, [bom]);
 
   const handleExportPng = useCallback(() => {
+    trackExport('png');
     const dataUrl = captureRef.current?.takeScreenshot() ?? null;
     if (dataUrl) downloadPng(dataUrl, `pergola-${Date.now()}.png`);
   }, []);
 
   const handleShareLink = useCallback(async () => {
     if (typeof window === 'undefined') return;
+    trackShareLink();
     const url = `${window.location.origin}${window.location.pathname}${encodeSpecToHash(spec)}`;
     const ok = await copyTextToClipboard(url);
-    setShareNotice(ok ? 'Share link copied to clipboard' : 'Could not copy automatically — copy the URL above.');
+    setShareNotice(ok ? 'Share link copied to clipboard' : 'Could not copy — use the URL bar.');
     window.setTimeout(() => setShareNotice(null), 3200);
   }, [spec]);
 
-  // ----- Keyboard shortcuts -----
+  const handleLeadSubmit = useCallback(
+    (data: { name: string; email: string; phone: string }) => {
+      trackLeadSubmitted(data.phone.length > 0);
+      embedApi.emit('oc:leadSubmitted', { lead: data, spec, quote });
+    },
+    [spec, quote],
+  );
+
+  // ----- View presets -----
+  const handleViewPreset = useCallback((preset: ViewPreset) => {
+    setViewPreset(preset);
+    trackViewPresetChanged(preset);
+  }, []);
+
+  // ----- Keyboard -----
   useKeyboardShortcuts(
     useMemo(
       () => [
-        { combo: 'mod+z', handler: () => history.undo(), description: 'Undo' },
-        { combo: 'mod+shift+z', handler: () => history.redo(), description: 'Redo' },
-        { combo: 'mod+y', handler: () => history.redo(), description: 'Redo' },
-        { combo: 'mod+s', handler: () => saveCurrentConfig(), description: 'Save configuration' },
-        { combo: 'mod+e', handler: () => handleExportJson(), description: 'Export JSON' },
-        { combo: 'mod+k', handler: () => handleShareLink(), description: 'Copy share link' },
-        { combo: '1', handler: () => setViewPreset('orbit') },
-        { combo: '2', handler: () => setViewPreset('front') },
-        { combo: '3', handler: () => setViewPreset('side') },
-        { combo: '4', handler: () => setViewPreset('top') },
+        { combo: 'mod+z', handler: () => history.undo() },
+        { combo: 'mod+shift+z', handler: () => history.redo() },
+        { combo: 'mod+y', handler: () => history.redo() },
+        { combo: 'mod+s', handler: () => saveCurrentConfig() },
+        { combo: 'mod+e', handler: () => handleExportJson() },
+        { combo: 'mod+k', handler: () => handleShareLink() },
+        { combo: '1', handler: () => handleViewPreset('orbit') },
+        { combo: '2', handler: () => handleViewPreset('front') },
+        { combo: '3', handler: () => handleViewPreset('side') },
+        { combo: '4', handler: () => handleViewPreset('top') },
+        { combo: 'd', handler: () => setShowDimensions((prev) => !prev) },
       ],
-      [history, saveCurrentConfig, handleExportJson, handleShareLink],
+      [history, saveCurrentConfig, handleExportJson, handleShareLink, handleViewPreset],
     ),
   );
 
-  // ----- Apply view preset to scene -----
   useEffect(() => {
     captureRef.current?.setViewPreset(viewPreset);
   }, [viewPreset]);
@@ -308,68 +396,68 @@ export default function PergolaTemplate(): JSX.Element {
           buildOptions={buildOptions}
           viewPreset={viewPreset}
           captureRef={captureRef}
+          showDimensions={showDimensions}
         />
 
         <div className="view-controls" role="toolbar" aria-label="Camera view presets">
-          {(['orbit', 'front', 'side', 'top'] as ViewPreset[]).map((preset) => (
+          {(['orbit', 'front', 'side', 'top'] as ViewPreset[]).map((preset, idx) => (
             <button
               key={preset}
               type="button"
               className={viewPreset === preset ? 'active' : ''}
-              onClick={() => setViewPreset(preset)}
+              onClick={() => handleViewPreset(preset)}
               aria-pressed={viewPreset === preset}
-              title={`View: ${preset} (press ${(['1', '2', '3', '4'] as const)[(['orbit', 'front', 'side', 'top'] as ViewPreset[]).indexOf(preset)]})`}
+              title={`${preset} (${idx + 1})`}
             >
               {preset}
             </button>
           ))}
+          <button
+            type="button"
+            className={showDimensions ? 'active' : ''}
+            onClick={() => setShowDimensions((prev) => !prev)}
+            aria-pressed={showDimensions}
+            title="Dimension labels (D)"
+          >
+            dims
+          </button>
         </div>
       </div>
 
       <aside className="panel-wrap" aria-label="Pergola configurator panel">
         <section className="glass-card hero-card panel-header">
-          <p className="eyebrow">Pergola Studio 3D</p>
-          <h1>Configurator</h1>
-          <p>Interactive GLB + mathematical pergola editor with live engineering, pricing, and exports.</p>
+          <p className="eyebrow">{t('pergola.hero.eyebrow')}</p>
+          <h1>{t('pergola.hero.title')}</h1>
+          <p>{t('pergola.hero.subtitle')}</p>
           <div className="summary-pills" aria-label="Active configuration summary">
-            <span className="summary-pill">{spec.modelMode === 'sample' ? 'Sample Model' : 'Math Model'}</span>
+            <span className="summary-pill">{spec.modelMode === 'sample' ? 'Sample' : 'Math'}</span>
             <span className="summary-pill">{activeSizeLabel}</span>
             <span className="summary-pill">{materialPreset.label}</span>
             <span className="summary-pill">{TEXTURE_LABELS[spec.texturePreset]}</span>
             <span className="summary-pill">{loadScenario.label}</span>
           </div>
 
-          <div className="inline-actions" role="toolbar" aria-label="Configurator history controls">
-            <button
-              type="button"
-              className="oc-icon-btn"
-              onClick={history.undo}
-              disabled={!history.canUndo}
-              aria-label="Undo last change"
-              title="Undo (⌘Z)"
-            >
-              ↶ Undo
+          <div className="inline-actions" role="toolbar" aria-label="History controls">
+            <button type="button" className="oc-icon-btn" onClick={history.undo} disabled={!history.canUndo} title="Undo (⌘Z)">
+              {t('undo')}
             </button>
-            <button
-              type="button"
-              className="oc-icon-btn"
-              onClick={history.redo}
-              disabled={!history.canRedo}
-              aria-label="Redo change"
-              title="Redo (⌘⇧Z)"
-            >
-              ↷ Redo
+            <button type="button" className="oc-icon-btn" onClick={history.redo} disabled={!history.canRedo} title="Redo (⌘⇧Z)">
+              {t('redo')}
             </button>
-            <button
-              type="button"
-              className="oc-icon-btn"
-              onClick={() => history.reset(DEFAULT_PERGOLA_SPEC)}
-              title="Reset all values"
-            >
-              ⟲ Reset
+            <button type="button" className="oc-icon-btn" onClick={() => history.reset(DEFAULT_PERGOLA_SPEC)} title="Reset all">
+              {t('reset')}
             </button>
           </div>
         </section>
+
+        {/* Rule warnings */}
+        {ruleResult.warnings.length > 0 && (
+          <div className="rule-warnings" role="alert">
+            {ruleResult.warnings.map((msg, idx) => (
+              <div key={idx} className="rule-warning">{msg}</div>
+            ))}
+          </div>
+        )}
 
         <nav className="oc-stepper" aria-label="Configuration steps">
           {STEPS.map((step, index) => (
@@ -380,7 +468,7 @@ export default function PergolaTemplate(): JSX.Element {
               onClick={() => setActiveStep(step.id)}
               aria-current={activeStep === step.id ? 'step' : undefined}
             >
-              {index + 1}. {step.label}
+              {index + 1}. {t(step.tKey)}
             </button>
           ))}
         </nav>
@@ -389,7 +477,7 @@ export default function PergolaTemplate(): JSX.Element {
           <section className="glass-card" aria-labelledby="step-model">
             <div className="section-head">
               <span className="section-kicker">Step 1</span>
-              <h2 id="step-model" className="section-title">Model & Dimensions</h2>
+              <h2 id="step-model" className="section-title">{t('pergola.step.model')}</h2>
             </div>
 
             <div className="segmented" role="radiogroup" aria-label="Render mode">
@@ -398,18 +486,24 @@ export default function PergolaTemplate(): JSX.Element {
                 role="radio"
                 aria-checked={spec.modelMode === 'sample'}
                 className={spec.modelMode === 'sample' ? 'active' : ''}
-                onClick={() => updateSpec((current) => ({ ...current, modelMode: 'sample' }))}
+                onClick={() => {
+                  trackOptionChanged('modelMode', 'sample', spec.modelMode);
+                  updateSpec((c) => ({ ...c, modelMode: 'sample' }));
+                }}
               >
-                Sample GLB
+                {t('pergola.model.sampleGlb')}
               </button>
               <button
                 type="button"
                 role="radio"
                 aria-checked={spec.modelMode === 'parametric'}
                 className={spec.modelMode === 'parametric' ? 'active' : ''}
-                onClick={() => updateSpec((current) => ({ ...current, modelMode: 'parametric' }))}
+                onClick={() => {
+                  trackOptionChanged('modelMode', 'parametric', spec.modelMode);
+                  updateSpec((c) => ({ ...c, modelMode: 'parametric' }));
+                }}
               >
-                Mathematical
+                {t('pergola.model.mathematical')}
               </button>
             </div>
 
@@ -418,57 +512,25 @@ export default function PergolaTemplate(): JSX.Element {
                 <button
                   key={preset.id}
                   type="button"
-                  className={
-                    spec.sizeId === preset.id && !spec.usesCustomSize
-                      ? 'active size-option'
-                      : 'size-option'
-                  }
+                  className={spec.sizeId === preset.id && !spec.usesCustomSize ? 'active size-option' : 'size-option'}
                   onClick={() => applyPreset(preset.id)}
                   aria-pressed={spec.sizeId === preset.id && !spec.usesCustomSize}
                 >
                   <strong>{preset.label.split(' ')[0]}</strong>
-                  <small>
-                    {preset.width}m × {preset.depth}m × {preset.height}m
-                  </small>
+                  <small>{preset.width}m × {preset.depth}m × {preset.height}m</small>
                 </button>
               ))}
             </div>
 
             <div className="range-stack">
-              <RangeControl
-                label="Width"
-                value={spec.dimensions.width}
-                min={DIMENSION_LIMITS.width[0]}
-                max={DIMENSION_LIMITS.width[1]}
-                step={0.05}
-                onChange={(value) => setDimension('width', value)}
-                fractionDigits={2}
-              />
-              <RangeControl
-                label="Depth"
-                value={spec.dimensions.depth}
-                min={DIMENSION_LIMITS.depth[0]}
-                max={DIMENSION_LIMITS.depth[1]}
-                step={0.05}
-                onChange={(value) => setDimension('depth', value)}
-                fractionDigits={2}
-              />
-              <RangeControl
-                label="Height"
-                value={spec.dimensions.height}
-                min={DIMENSION_LIMITS.height[0]}
-                max={DIMENSION_LIMITS.height[1]}
-                step={0.05}
-                onChange={(value) => setDimension('height', value)}
-                fractionDigits={2}
-              />
+              <RangeControl label={t('pergola.model.width')} value={spec.dimensions.width} min={DIMENSION_LIMITS.width[0]} max={DIMENSION_LIMITS.width[1]} step={0.05} onChange={(v) => setDimension('width', v)} fractionDigits={2} />
+              <RangeControl label={t('pergola.model.depth')} value={spec.dimensions.depth} min={DIMENSION_LIMITS.depth[0]} max={DIMENSION_LIMITS.depth[1]} step={0.05} onChange={(v) => setDimension('depth', v)} fractionDigits={2} />
+              <RangeControl label={t('pergola.model.height')} value={spec.dimensions.height} min={DIMENSION_LIMITS.height[0]} max={DIMENSION_LIMITS.height[1]} step={0.05} onChange={(v) => setDimension('height', v)} fractionDigits={2} />
             </div>
 
             <div className="inline-actions">
-              <button type="button" className="ghost" onClick={() => applyPreset(spec.sizeId)}>
-                Reapply Selected Preset
-              </button>
-              {spec.usesCustomSize && <span className="tag">Using custom dimensions</span>}
+              <button type="button" className="ghost" onClick={() => applyPreset(spec.sizeId)}>{t('pergola.model.reapply')}</button>
+              {spec.usesCustomSize && <span className="tag">{t('pergola.model.customDims')}</span>}
             </div>
           </section>
         )}
@@ -477,17 +539,20 @@ export default function PergolaTemplate(): JSX.Element {
           <section className="glass-card" aria-labelledby="step-material">
             <div className="section-head">
               <span className="section-kicker">Step 2</span>
-              <h2 id="step-material" className="section-title">Materials</h2>
+              <h2 id="step-material" className="section-title">{t('pergola.step.material')}</h2>
             </div>
 
-            <h3>Frame Material</h3>
+            <h3>{t('pergola.material.frame')}</h3>
             <div className="color-grid">
               {MATERIAL_PRESETS.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
                   className={`color-chip ${spec.materialId === preset.id ? 'active' : ''}`}
-                  onClick={() => updateSpec((current) => ({ ...current, materialId: preset.id }))}
+                  onClick={() => {
+                    trackOptionChanged('materialId', preset.id, spec.materialId);
+                    updateSpec((c) => ({ ...c, materialId: preset.id }));
+                  }}
                   aria-pressed={spec.materialId === preset.id}
                 >
                   <span style={{ background: preset.swatch }} aria-hidden />
@@ -496,17 +561,21 @@ export default function PergolaTemplate(): JSX.Element {
               ))}
             </div>
 
-            <h3>Texture Style</h3>
+            <h3>{t('pergola.material.texture')}</h3>
             <div className="texture-grid">
-              {(Object.keys(TEXTURE_LABELS) as Array<keyof typeof TEXTURE_LABELS>).map((texture) => (
+              {(Object.keys(TEXTURE_LABELS) as Array<keyof typeof TEXTURE_LABELS>).map((tex) => (
                 <button
-                  key={texture}
+                  key={tex}
                   type="button"
-                  className={spec.texturePreset === texture ? 'active' : ''}
-                  onClick={() => updateSpec((current) => ({ ...current, texturePreset: texture }))}
-                  aria-pressed={spec.texturePreset === texture}
+                  className={spec.texturePreset === tex ? 'active' : ''}
+                  onClick={() => {
+                    trackOptionChanged('texturePreset', tex, spec.texturePreset);
+                    updateSpec((c) => ({ ...c, texturePreset: tex }));
+                  }}
+                  aria-pressed={spec.texturePreset === tex}
+                  disabled={ruleResult.disabledFields.has(`texturePreset.${tex}`)}
                 >
-                  {TEXTURE_LABELS[texture]}
+                  {TEXTURE_LABELS[tex]}
                 </button>
               ))}
             </div>
@@ -517,62 +586,22 @@ export default function PergolaTemplate(): JSX.Element {
           <section className="glass-card" aria-labelledby="step-structure">
             <div className="section-head">
               <span className="section-kicker">Step 3</span>
-              <h2 id="step-structure" className="section-title">Mathematical Structure</h2>
+              <h2 id="step-structure" className="section-title">{t('pergola.step.structure')}</h2>
             </div>
 
-            <p className="hint">Live formula: {MODEL_FORMULA}</p>
-            <p className="hint">
-              Physics model uses roof load + deflection and stress checks to auto-size beams and add bays/posts.
-            </p>
-            {spec.modelMode !== 'parametric' && (
-              <p className="mode-note">Switch to Mathematical mode to edit structural variables live.</p>
-            )}
+            <p className="hint">{t('pergola.structure.formula')}: {MODEL_FORMULA}</p>
+            <p className="hint">{t('pergola.structure.hint')}</p>
+            {spec.modelMode !== 'parametric' && <p className="mode-note">{t('pergola.structure.switchNote')}</p>}
 
             <div className="range-stack">
-              <RangeControl
-                label="Min Post Width"
-                value={spec.parameters.postThickness}
-                min={0.1}
-                max={0.24}
-                step={0.005}
-                onChange={(value) => setParameter('postThickness', value)}
-                disabled={spec.modelMode !== 'parametric'}
-              />
-              <RangeControl
-                label="Min Beam Width"
-                value={spec.parameters.beamThickness}
-                min={0.08}
-                max={0.22}
-                step={0.005}
-                onChange={(value) => setParameter('beamThickness', value)}
-                disabled={spec.modelMode !== 'parametric'}
-              />
-              <RangeControl
-                label="Slat Thickness"
-                value={spec.parameters.slatThickness}
-                min={0.02}
-                max={0.08}
-                step={0.0025}
-                onChange={(value) => setParameter('slatThickness', value)}
-                disabled={spec.modelMode !== 'parametric'}
-              />
-              <RangeControl
-                label="Slat Spacing"
-                value={spec.parameters.slatSpacing}
-                min={0.12}
-                max={0.4}
-                step={0.01}
-                onChange={(value) => setParameter('slatSpacing', value)}
-                disabled={spec.modelMode !== 'parametric'}
-              />
+              <RangeControl label="Min Post Width" value={spec.parameters.postThickness} min={0.1} max={0.24} step={0.005} onChange={(v) => setParameter('postThickness', v)} disabled={spec.modelMode !== 'parametric'} />
+              <RangeControl label="Min Beam Width" value={spec.parameters.beamThickness} min={0.08} max={0.22} step={0.005} onChange={(v) => setParameter('beamThickness', v)} disabled={spec.modelMode !== 'parametric'} />
+              <RangeControl label="Slat Thickness" value={spec.parameters.slatThickness} min={0.02} max={0.08} step={0.0025} onChange={(v) => setParameter('slatThickness', v)} disabled={spec.modelMode !== 'parametric'} />
+              <RangeControl label="Slat Spacing" value={spec.parameters.slatSpacing} min={0.12} max={0.4} step={0.01} onChange={(v) => setParameter('slatSpacing', v)} disabled={spec.modelMode !== 'parametric'} />
             </div>
 
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => updateSpec((current) => ({ ...current, parameters: { ...DEFAULT_PARAMETERS } }))}
-            >
-              Reset Structural Parameters
+            <button type="button" className="ghost" onClick={() => updateSpec((c) => ({ ...c, parameters: { ...DEFAULT_PARAMETERS } }))}>
+              {t('pergola.structure.reset')}
             </button>
           </section>
         )}
@@ -581,115 +610,62 @@ export default function PergolaTemplate(): JSX.Element {
           <section className="glass-card" aria-labelledby="step-engineering">
             <div className="section-head">
               <span className="section-kicker">Step 4</span>
-              <h2 id="step-engineering" className="section-title">Engineering & Compliance</h2>
+              <h2 id="step-engineering" className="section-title">{t('pergola.step.engineering')}</h2>
             </div>
 
-            <h3>Loading Scenario</h3>
+            <h3>{t('pergola.engineering.loadScenario')}</h3>
             <div className="size-grid size-grid-advanced">
               {LOAD_SCENARIOS.map((scenario) => (
                 <button
                   key={scenario.id}
                   type="button"
-                  className={
-                    spec.loadScenarioId === scenario.id ? 'active size-option' : 'size-option'
-                  }
-                  onClick={() => updateSpec((current) => ({ ...current, loadScenarioId: scenario.id }))}
+                  className={spec.loadScenarioId === scenario.id ? 'active size-option' : 'size-option'}
+                  onClick={() => {
+                    trackOptionChanged('loadScenarioId', scenario.id, spec.loadScenarioId);
+                    updateSpec((c) => ({ ...c, loadScenarioId: scenario.id }));
+                  }}
                   aria-pressed={spec.loadScenarioId === scenario.id}
                 >
                   <strong>{scenario.label}</strong>
-                  <small>
-                    {scenario.roofLoadKPa.toFixed(2)} kPa • lateral ×{scenario.lateralFactor.toFixed(2)}
-                  </small>
+                  <small>{scenario.roofLoadKPa.toFixed(2)} kPa • lateral ×{scenario.lateralFactor.toFixed(2)}</small>
                 </button>
               ))}
             </div>
             <p className="hint">{loadScenario.description}</p>
 
-            <h3>Compliance Snapshot</h3>
+            <h3>{t('pergola.engineering.compliance')}</h3>
             <div className={`compliance-row ${utilizationStatus}`}>
-              <span>Beam utilization</span>
+              <span>Utilization</span>
               <div className="util-bar" aria-hidden>
                 <span style={{ width: `${Math.min(100, utilization)}%` }} />
               </div>
               <strong>{fmtPercent(utilization, 0)}</strong>
             </div>
             <p className="hint">
-              Status:{' '}
-              <span className={`tag ${utilizationStatus === 'success' ? 'success' : utilizationStatus}`}>
-                {utilizationStatus === 'success'
-                  ? 'Within design envelope'
-                  : utilizationStatus === 'warn'
-                    ? 'Approaching limits'
-                    : 'Exceeds preliminary envelope'}
+              <span className={`tag ${utilizationStatus}`}>
+                {utilizationStatus === 'success' ? 'Within design envelope' : utilizationStatus === 'warn' ? 'Approaching limits' : 'Exceeds preliminary envelope'}
               </span>
             </p>
 
-            <h3>Engineering Metrics</h3>
+            <h3>{t('pergola.engineering.metrics')}</h3>
             <div className="metrics-grid" aria-label="Engineering metrics">
               <div className="metric-highlight">
                 <span className="metric-label">Dimensions</span>
-                <strong>
-                  {fmtMeters(spec.dimensions.width)} × {fmtMeters(spec.dimensions.depth)} × {fmtMeters(spec.dimensions.height)}
-                </strong>
+                <strong>{fmtMeters(spec.dimensions.width)} × {fmtMeters(spec.dimensions.depth)} × {fmtMeters(spec.dimensions.height)}</strong>
               </div>
-              <div>
-                <span className="metric-label">Footprint</span>
-                <strong>{fmtArea(model.metrics.footprintM2)}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Perimeter</span>
-                <strong>{fmtMeters(model.metrics.perimeterM)}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Clear Height</span>
-                <strong>{fmtMeters(model.metrics.clearHeightM)}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Slat Count</span>
-                <strong>{model.metrics.slatCount}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Post Count</span>
-                <strong>{model.metrics.postCount}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Bays</span>
-                <strong>
-                  {model.metrics.bayCountX} × {model.metrics.bayCountZ}
-                </strong>
-              </div>
-              <div>
-                <span className="metric-label">Beam Section</span>
-                <strong>{fmtSectionMm(model.metrics.beamWidthM, model.metrics.beamDepthM)}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Post Section</span>
-                <strong>{Math.round(model.metrics.postThicknessM * 1000)} mm</strong>
-              </div>
-              <div>
-                <span className="metric-label">Sections</span>
-                <strong>{model.metrics.sectionCount}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Max Clear Span</span>
-                <strong>{fmtMeters(model.metrics.maxClearSpanM)}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Shade Coverage</span>
-                <strong>{fmtPercent(model.metrics.shadeCoveragePct, 1)}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Design Load</span>
-                <strong>{model.metrics.designLoadKPa.toFixed(2)} kPa</strong>
-              </div>
-              <div>
-                <span className="metric-label">Frame Volume</span>
-                <strong>{fmtVolume(model.metrics.frameVolumeM3)}</strong>
-              </div>
-              <div>
-                <span className="metric-label">Estimated Weight</span>
-                <strong>{fmtWeight(model.metrics.estimatedWeightKg)}</strong>
-              </div>
+              <div><span className="metric-label">Footprint</span><strong>{fmtArea(model.metrics.footprintM2)}</strong></div>
+              <div><span className="metric-label">Perimeter</span><strong>{fmtMeters(model.metrics.perimeterM)}</strong></div>
+              <div><span className="metric-label">Clear Height</span><strong>{fmtMeters(model.metrics.clearHeightM)}</strong></div>
+              <div><span className="metric-label">Slat Count</span><strong>{model.metrics.slatCount}</strong></div>
+              <div><span className="metric-label">Post Count</span><strong>{model.metrics.postCount}</strong></div>
+              <div><span className="metric-label">Bays</span><strong>{model.metrics.bayCountX} × {model.metrics.bayCountZ}</strong></div>
+              <div><span className="metric-label">Beam Section</span><strong>{fmtSectionMm(model.metrics.beamWidthM, model.metrics.beamDepthM)}</strong></div>
+              <div><span className="metric-label">Post Section</span><strong>{Math.round(model.metrics.postThicknessM * 1000)} mm</strong></div>
+              <div><span className="metric-label">Max Clear Span</span><strong>{fmtMeters(model.metrics.maxClearSpanM)}</strong></div>
+              <div><span className="metric-label">Shade Coverage</span><strong>{fmtPercent(model.metrics.shadeCoveragePct, 1)}</strong></div>
+              <div><span className="metric-label">Design Load</span><strong>{model.metrics.designLoadKPa.toFixed(2)} kPa</strong></div>
+              <div><span className="metric-label">Frame Volume</span><strong>{fmtVolume(model.metrics.frameVolumeM3)}</strong></div>
+              <div><span className="metric-label">Estimated Weight</span><strong>{fmtWeight(model.metrics.estimatedWeightKg)}</strong></div>
             </div>
           </section>
         )}
@@ -698,81 +674,55 @@ export default function PergolaTemplate(): JSX.Element {
           <section className="glass-card" aria-labelledby="step-quote">
             <div className="section-head">
               <span className="section-kicker">Step 5</span>
-              <h2 id="step-quote" className="section-title">Quote, BOM & Export</h2>
+              <h2 id="step-quote" className="section-title">{t('pergola.step.quote')}</h2>
             </div>
 
-            <h3>Estimated Investment</h3>
+            <h3>{t('pergola.quote.heading')}</h3>
             <div className="quote-summary" aria-label="Estimated quote">
               {quote.lines.map((line) => (
                 <div key={line.id} className="quote-row">
-                  <span>
-                    {line.label}
-                    {line.detail ? <small style={{ display: 'block', opacity: 0.7 }}>{line.detail}</small> : null}
-                  </span>
+                  <span>{line.label}{line.detail ? <small style={{ display: 'block', opacity: 0.7 }}>{line.detail}</small> : null}</span>
                   <strong>{fmtCurrency(line.amount)}</strong>
                 </div>
               ))}
-              <div className="quote-row">
-                <span>Subtotal</span>
-                <strong>{fmtCurrency(quote.subtotal)}</strong>
-              </div>
-              <div className="quote-row">
-                <span>Tax (estimated)</span>
-                <strong>{fmtCurrency(quote.tax)}</strong>
-              </div>
-              <div className="quote-total">
-                <span>Total</span>
-                <strong>{fmtCurrency(quote.total)}</strong>
-              </div>
+              <div className="quote-row"><span>{t('pergola.quote.subtotal')}</span><strong>{fmtCurrency(quote.subtotal)}</strong></div>
+              <div className="quote-row"><span>{t('pergola.quote.tax')}</span><strong>{fmtCurrency(quote.tax)}</strong></div>
+              <div className="quote-total"><span>{t('pergola.quote.total')}</span><strong>{fmtCurrency(quote.total)}</strong></div>
             </div>
 
-            <h3>Bill of Materials</h3>
+            <h3>{t('pergola.quote.bom')}</h3>
             <table className="bom-table" aria-label="Bill of materials">
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th>Section</th>
-                  <th className="right">Qty</th>
-                  <th className="right">Length</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Category</th><th>Section</th><th className="right">Qty</th><th className="right">Length</th></tr></thead>
               <tbody>
                 {bom.map((row) => (
                   <tr key={`${row.category}-${row.section}-${row.lengthM}`}>
-                    <td>{row.category}</td>
-                    <td>{row.section}</td>
-                    <td className="right">{row.count}</td>
-                    <td className="right">{row.totalLengthM.toFixed(2)} m</td>
+                    <td>{row.category}</td><td>{row.section}</td><td className="right">{row.count}</td><td className="right">{row.totalLengthM.toFixed(2)} m</td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
-            <h3>Export & Share</h3>
+            <h3>{t('pergola.quote.export')}</h3>
             <div className="inline-actions">
-              <button type="button" className="oc-icon-btn primary" onClick={handleExportJson} title="Export JSON (⌘E)">
-                ⤓ JSON
-              </button>
-              <button type="button" className="oc-icon-btn" onClick={handleExportCsv}>
-                ⤓ BOM (CSV)
-              </button>
-              <button type="button" className="oc-icon-btn" onClick={handleExportPng}>
-                ⤓ PNG
-              </button>
-              <button type="button" className="oc-icon-btn" onClick={handleShareLink} title="Copy share link (⌘K)">
-                ↗ Share link
-              </button>
+              <button type="button" className="oc-icon-btn primary" onClick={handleExportJson} title="Export JSON (⌘E)">⤓ JSON</button>
+              <button type="button" className="oc-icon-btn" onClick={handleExportCsv}>⤓ BOM</button>
+              <button type="button" className="oc-icon-btn" onClick={handleExportPng}>⤓ PNG</button>
+              <button type="button" className="oc-icon-btn" onClick={handleShareLink} title="Copy share link (⌘K)">↗ Share</button>
             </div>
             {shareNotice && <p className="hint" role="status">{shareNotice}</p>}
 
-            <h3>Saved Configurations</h3>
+            <h3>{t('lead.heading')}</h3>
+            <LeadCaptureForm
+              specJson={JSON.stringify(spec)}
+              onSubmit={handleLeadSubmit}
+            />
+
+            <h3>{t('pergola.quote.savedHeading')}</h3>
             <div className="inline-actions">
-              <button type="button" className="oc-icon-btn" onClick={saveCurrentConfig} title="Save (⌘S)">
-                ＋ Save current
-              </button>
+              <button type="button" className="oc-icon-btn" onClick={saveCurrentConfig} title="Save (⌘S)">{t('pergola.quote.saveCurrent')}</button>
             </div>
             {savedConfigs.length === 0 ? (
-              <p className="hint">No saved configurations yet.</p>
+              <p className="hint">{t('pergola.quote.noSaved')}</p>
             ) : (
               <div className="saved-list">
                 {savedConfigs.map((entry) => (
@@ -783,7 +733,7 @@ export default function PergolaTemplate(): JSX.Element {
                     </div>
                     <div className="saved-actions">
                       <button type="button" onClick={() => loadSavedConfig(entry)}>Load</button>
-                      <button type="button" className="danger" onClick={() => deleteSavedConfig(entry.id)}>Delete</button>
+                      <button type="button" className="danger" onClick={() => deleteSavedConfig(entry.id)}>Del</button>
                     </div>
                   </div>
                 ))}

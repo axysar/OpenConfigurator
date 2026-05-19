@@ -994,6 +994,334 @@ input[type='range'] {
   }
 }
 
+/* ---------------- Lead capture form ---------------- */
+
+.lead-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.lead-field {
+  display: grid;
+  gap: 4px;
+}
+
+.lead-field label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.lead-field input,
+.lead-field textarea {
+  border: 1px solid var(--line-strong);
+  background: var(--bg-soft);
+  color: var(--text-primary);
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  font-weight: 500;
+  outline: none;
+  resize: vertical;
+}
+
+.lead-field input:focus,
+.lead-field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.lead-field input::placeholder,
+.lead-field textarea::placeholder {
+  color: var(--text-faint);
+  opacity: 0.7;
+}
+
+.lead-submit {
+  width: 100%;
+  justify-content: center;
+  height: 42px;
+  font-size: 0.88rem;
+}
+
+.lead-privacy {
+  font-size: 0.66rem;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.lead-success {
+  text-align: center;
+  padding: 16px 8px;
+}
+
+.lead-success strong {
+  font-size: 1.1rem;
+  color: var(--good);
+}
+
+/* -------- Locale / language picker -------- */
+
+.oc-locale-select {
+  border: 1px solid var(--line-strong);
+  background: var(--bg-soft);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
+  outline: none;
+  min-width: 62px;
+}
+
+/* -------- Rule warnings toast -------- */
+
+.rule-warnings {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.rule-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(246, 199, 104, 0.5);
+  background: rgba(246, 199, 104, 0.08);
+  font-size: 0.74rem;
+  color: var(--warn);
+  line-height: 1.35;
+}
+
+/* -------- Loading skeleton / spinner -------- */
+
+.oc-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg-app);
+}
+
+.oc-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--line-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* -------- Performance stats overlay -------- */
+
+.perf-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 20;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-soft);
+  background: rgba(10, 20, 38, 0.86);
+  backdrop-filter: blur(8px);
+  font-family: 'Space Grotesk', monospace;
+  font-size: 0.64rem;
+  color: var(--text-faint);
+  pointer-events: none;
+  display: grid;
+  gap: 2px;
+}
+
+.perf-overlay strong {
+  color: var(--accent);
+}
+
+/* -------- Enhanced mobile - 480px and below -------- */
+
+@media (max-width: 480px) {
+  .oc-topbar {
+    padding: 8px 10px;
+    gap: 8px;
+    top: 0;
+    left: 0;
+    right: 0;
+    border-radius: 0;
+    position: sticky;
+  }
+
+  .oc-brand p { display: none; }
+
+  .oc-eyebrow { font-size: 0.62rem; }
+
+  .oc-brand h1 { font-size: 0.84rem; }
+
+  .oc-topbar-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .oc-template-switcher {
+    min-width: 0;
+  }
+
+  .oc-template-switcher select {
+    padding: 6px 8px;
+    font-size: 0.74rem;
+  }
+
+  .oc-icon-btn {
+    height: 32px;
+    min-width: 32px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+  }
+
+  .scene-container {
+    min-height: 38vh;
+    max-height: 44vh;
+  }
+
+  .panel-wrap {
+    padding: 10px;
+    gap: 8px;
+    min-height: 0;
+  }
+
+  .app-shell h1 {
+    font-size: 1.15rem;
+  }
+
+  .summary-pills {
+    gap: 5px;
+  }
+
+  .summary-pill {
+    font-size: 0.6rem;
+    padding: 3px 7px;
+  }
+
+  .oc-stepper {
+    gap: 4px;
+    padding: 4px 0;
+  }
+
+  .oc-stepper button {
+    min-width: 56px;
+    padding: 6px 4px;
+    font-size: 0.58rem;
+  }
+
+  .glass-card {
+    padding: 10px;
+    border-radius: var(--radius-sm);
+  }
+
+  .section-head { gap: 6px; margin-bottom: 8px; }
+
+  .range-control { padding: 6px 7px; }
+
+  .view-controls {
+    bottom: 8px;
+    left: 8px;
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .view-controls button {
+    padding: 5px 7px;
+    font-size: 0.62rem;
+  }
+
+  .quote-total strong {
+    font-size: 1.15rem;
+  }
+
+  .bom-table {
+    font-size: 0.66rem;
+  }
+
+  .metrics-grid {
+    gap: 6px;
+  }
+
+  .metrics-grid > div {
+    padding: 7px;
+  }
+
+  /* Enlarge touch targets */
+  input[type='range'] {
+    height: 28px;
+  }
+
+  .color-chip {
+    min-height: 44px;
+  }
+
+  .segmented button,
+  .size-grid button,
+  .texture-grid button,
+  .ghost {
+    min-height: 44px;
+  }
+}
+
+/* Touch-device: larger targets */
+@media (pointer: coarse) {
+  .segmented button,
+  .size-grid button,
+  .texture-grid button,
+  .ghost,
+  .color-chip {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  .oc-icon-btn {
+    min-height: 40px;
+    min-width: 40px;
+  }
+
+  .oc-stepper button {
+    min-height: 38px;
+  }
+}
+
+/* -------- RTL layout support -------- */
+
+[dir='rtl'] .panel-wrap {
+  border-left: none;
+  border-right: 1px solid var(--line-strong);
+}
+
+[dir='rtl'] .app-shell {
+  grid-template-columns: 460px minmax(0, 1fr);
+}
+
+[dir='rtl'] .mode-note {
+  border-left: none;
+  border-right: 2px solid var(--accent);
+  padding-left: 0;
+  padding-right: 8px;
+}
+
+@media (max-width: 1200px) {
+  [dir='rtl'] .app-shell {
+    grid-template-columns: 1fr;
+  }
+  [dir='rtl'] .panel-wrap {
+    border-right: 0;
+  }
+}
+
 /* ---------------- Visually hidden helper ---------------- */
 
 .sr-only {

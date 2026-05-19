@@ -23,6 +23,7 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/three": "^0.175.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.8.2",
     "vite": "^6.2.0",
     "vitest": "^4.1.3"

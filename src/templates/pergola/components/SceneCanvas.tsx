@@ -15,6 +15,7 @@ import {
 } from '../lib/pergolaMath';
 import { ParametricPergola } from './ParametricPergola';
 import { SamplePergola } from './SamplePergola';
+import { DimensionLabels } from './DimensionLabels';
 
 export type ViewPreset = 'orbit' | 'front' | 'side' | 'top';
 
@@ -32,6 +33,7 @@ interface SceneCanvasProps {
   buildOptions?: BuildPergolaOptions;
   viewPreset?: ViewPreset;
   captureRef?: RefObject<SceneCaptureHandle>;
+  showDimensions?: boolean;
 }
 
 interface CameraFitProps {
@@ -148,6 +150,7 @@ export const SceneCanvas = ({
   buildOptions,
   viewPreset = 'orbit',
   captureRef,
+  showDimensions = false,
 }: SceneCanvasProps): JSX.Element => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
@@ -243,6 +246,7 @@ export const SceneCanvas = ({
           />
         )}
 
+        <DimensionLabels dimensions={dimensions} visible={showDimensions} />
         <Ground texture={grassTexture} />
         <ContactShadows
           key={contactShadowKey}
