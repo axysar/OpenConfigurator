@@ -1322,6 +1322,301 @@ input[type='range'] {
   }
 }
 
+/* ---------------- Hotspots ---------------- */
+
+.hotspot-container {
+  position: relative;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.hotspot-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  position: relative;
+}
+
+.hotspot-ping {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: hotspot-ping 2s ease-out infinite;
+}
+
+@keyframes hotspot-ping {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.hotspot-popup {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 20, 38, 0.92);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  min-width: 180px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.hotspot-popup strong {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.hotspot-popup span {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* -------------- Tour tooltip -------------- */
+
+.tour-tooltip {
+  position: fixed;
+  z-index: 9999;
+  transform: translate(-50%, 0);
+  background: var(--bg-panel-strong);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  max-width: 320px;
+  min-width: 240px;
+  backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: var(--shadow-pop);
+  animation: fade-in 0.3s ease-out;
+}
+
+.tour-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.tour-header strong {
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.tour-close {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 2px;
+}
+
+.tour-tooltip p {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
+.tour-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tour-progress {
+  font-size: 0.68rem;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.tour-nav {
+  display: flex;
+  gap: 6px;
+}
+
+/* -------------- Compare overlay -------------- */
+
+.compare-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  animation: fade-in 0.25s ease-out;
+}
+
+.compare-card {
+  width: 90%;
+  max-width: 720px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.compare-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.compare-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.compare-column {
+  display: grid;
+  gap: 4px;
+}
+
+.compare-label {
+  font-size: 0.82rem;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.compare-rows > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 0.76rem;
+}
+
+/* -------------- Inspiration gallery -------------- */
+
+.inspiration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.inspiration-card {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: var(--bg-soft);
+  cursor: pointer;
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.inspiration-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.inspiration-card strong {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.inspiration-card p {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  margin: 0;
+}
+
+.inspiration-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.inspiration-tags span {
+  font-size: 0.58rem;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-glow);
+  color: var(--text-primary);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* -------------- Environment picker -------------- */
+
+.env-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.env-picker button {
+  border: 1px solid var(--line-soft);
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.env-picker button.active {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--accent-glow);
+}
+
+/* -------------- Review / summary step -------------- */
+
+.review-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.review-grid > div {
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-soft);
+  background: var(--bg-soft);
+}
+
+.review-grid .review-label {
+  display: block;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin-bottom: 3px;
+}
+
+.review-grid strong {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+@media (max-width: 480px) {
+  .compare-body { grid-template-columns: 1fr; }
+  .inspiration-grid { grid-template-columns: 1fr; }
+  .review-grid { grid-template-columns: 1fr; }
+}
+
 /* ---------------- Visually hidden helper ---------------- */
 
 .sr-only {

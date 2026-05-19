@@ -5,17 +5,22 @@ import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { createPresetTexture } from '../lib/textureFactory';
 import { createGrassTexture } from '../lib/groundTexture';
+import { type SceneEnvironment, SCENE_ENVIRONMENTS } from '../lib/sceneEnvironments';
 import {
   type BuildPergolaOptions,
   type MaterialPreset,
   type ModelMode,
   type PergolaDimensions,
   type PergolaParameters,
+  type PergolaMetrics,
   type TexturePreset,
+  buildPergolaModel,
 } from '../lib/pergolaMath';
 import { ParametricPergola } from './ParametricPergola';
 import { SamplePergola } from './SamplePergola';
 import { DimensionLabels } from './DimensionLabels';
+import { PartHotspots } from './PartHotspots';
+import { SmoothCamera } from './SmoothCamera';
 
 export type ViewPreset = 'orbit' | 'front' | 'side' | 'top';
 
@@ -34,12 +39,9 @@ interface SceneCanvasProps {
   viewPreset?: ViewPreset;
   captureRef?: RefObject<SceneCaptureHandle>;
   showDimensions?: boolean;
-}
-
-interface CameraFitProps {
-  dimensions: PergolaDimensions;
-  controlsRef: RefObject<OrbitControlsImpl | null>;
-  viewPreset: ViewPreset;
+  showHotspots?: boolean;
+  autoRotate?: boolean;
+  environmentId?: string;
 }
 
 const positionForPreset = (
@@ -64,27 +66,52 @@ const positionForPreset = (
   }
 };
 
-const CameraFit = ({ dimensions, controlsRef, viewPreset }: CameraFitProps): null => {
+interface CameraFitProps {
+  dimensions: PergolaDimensions;
+  controlsRef: RefObject<OrbitControlsImpl | null>;
+  viewPreset: ViewPreset;
+  useSmoothTransition: boolean;
+}
+
+const CameraFit = ({ dimensions, controlsRef, viewPreset, useSmoothTransition }: CameraFitProps): JSX.Element | null => {
   const { camera } = useThree();
+  const { position, targetY } = useMemo(
+    () => positionForPreset(viewPreset, dimensions),
+    [viewPreset, dimensions],
+  );
+  const maxPlanSize = Math.max(dimensions.width, dimensions.depth);
+  const distance = maxPlanSize * 1.6 + dimensions.height * 1.45;
 
   useEffect(() => {
-    const { position, targetY } = positionForPreset(viewPreset, dimensions);
-    const maxPlanSize = Math.max(dimensions.width, dimensions.depth);
-    const distance = maxPlanSize * 1.6 + dimensions.height * 1.45;
-
-    camera.position.set(...position);
-    camera.lookAt(0, targetY, 0);
+    if (controlsRef.current) {
+      controlsRef.current.minDistance = Math.max(2.8, maxPlanSize * 0.7);
+      controlsRef.current.maxDistance = distance * 3.4;
+    }
     camera.near = 0.1;
     camera.far = 200;
     camera.updateProjectionMatrix();
+  }, [camera, controlsRef, maxPlanSize, distance]);
 
+  if (useSmoothTransition) {
+    return (
+      <SmoothCamera
+        targetPosition={position}
+        targetLookAt={[0, targetY, 0]}
+        controlsRef={controlsRef}
+        speed={5}
+      />
+    );
+  }
+
+  useEffect(() => {
+    camera.position.set(...position);
+    camera.lookAt(0, targetY, 0);
+    camera.updateProjectionMatrix();
     if (controlsRef.current) {
       controlsRef.current.target.set(0, targetY, 0);
-      controlsRef.current.minDistance = Math.max(2.8, maxPlanSize * 0.7);
-      controlsRef.current.maxDistance = distance * 3.4;
       controlsRef.current.update();
     }
-  }, [camera, controlsRef, dimensions, viewPreset]);
+  }, [camera, controlsRef, position, targetY]);
 
   return null;
 };
@@ -110,8 +137,8 @@ const CaptureBridge = ({ captureRef, controlsRef, dimensions }: CaptureBridgePro
         }
       },
       setViewPreset(preset: ViewPreset): void {
-        const { position, targetY } = positionForPreset(preset, dimensions);
-        camera.position.set(...position);
+        const { position: pos, targetY } = positionForPreset(preset, dimensions);
+        camera.position.set(...pos);
         camera.lookAt(0, targetY, 0);
         camera.updateProjectionMatrix();
         if (controlsRef.current) {
@@ -127,13 +154,12 @@ const CaptureBridge = ({ captureRef, controlsRef, dimensions }: CaptureBridgePro
   return null;
 };
 
-const Ground = ({ texture }: { texture: THREE.Texture }): JSX.Element => (
+const Ground = ({ texture, color }: { texture: THREE.Texture; color: string }): JSX.Element => (
   <group>
     <mesh position={[0, -0.004, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[160, 160]} />
-      <meshStandardMaterial map={texture} color="#88a978" roughness={0.97} metalness={0.02} />
+      <meshStandardMaterial map={texture} color={color} roughness={0.97} metalness={0.02} />
     </mesh>
-
     <mesh position={[0, -0.002, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <circleGeometry args={[16, 90]} />
       <meshStandardMaterial color="#7ba05f" roughness={0.95} metalness={0.01} />
@@ -151,8 +177,17 @@ export const SceneCanvas = ({
   viewPreset = 'orbit',
   captureRef,
   showDimensions = false,
+  showHotspots = false,
+  autoRotate = false,
+  environmentId = 'day',
 }: SceneCanvasProps): JSX.Element => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const hasInteracted = useRef(false);
+
+  const env: SceneEnvironment = useMemo(
+    () => SCENE_ENVIRONMENTS.find((e) => e.id === environmentId) ?? SCENE_ENVIRONMENTS[0],
+    [environmentId],
+  );
 
   const frameTexture = useMemo(() => createPresetTexture(texturePreset), [texturePreset]);
   const grassTexture = useMemo(() => createGrassTexture(), []);
@@ -160,6 +195,12 @@ export const SceneCanvas = ({
     () => Math.max(dimensions.width, dimensions.depth),
     [dimensions.depth, dimensions.width],
   );
+
+  const metrics: PergolaMetrics | null = useMemo(() => {
+    if (!showHotspots) return null;
+    return buildPergolaModel(dimensions, parameters, materialPreset, buildOptions).metrics;
+  }, [showHotspots, dimensions, parameters, materialPreset, buildOptions]);
+
   const contactShadowKey = useMemo(
     () =>
       [
@@ -169,28 +210,18 @@ export const SceneCanvas = ({
         dimensions.height.toFixed(2),
         parameters.postThickness.toFixed(3),
         parameters.beamThickness.toFixed(3),
-        parameters.slatThickness.toFixed(3),
-        parameters.slatSpacing.toFixed(3),
+        environmentId,
       ].join('-'),
-    [
-      mode,
-      dimensions.width,
-      dimensions.depth,
-      dimensions.height,
-      parameters.postThickness,
-      parameters.beamThickness,
-      parameters.slatThickness,
-      parameters.slatSpacing,
-    ],
+    [mode, dimensions.width, dimensions.depth, dimensions.height, parameters.postThickness, parameters.beamThickness, environmentId],
   );
 
   return (
     <Canvas
-      frameloop="demand"
+      frameloop={autoRotate ? 'always' : 'demand'}
       dpr={[1, 1.5]}
       performance={{ min: 0.7 }}
       shadows
-      camera={{ position: [8, 4.2, 8], fov: 42, near: 0.1, far: 120 }}
+      camera={{ position: [8, 4.2, 8], fov: 42, near: 0.1, far: 200 }}
       gl={{
         antialias: true,
         alpha: true,
@@ -198,25 +229,25 @@ export const SceneCanvas = ({
         powerPreference: 'high-performance',
       }}
     >
-      <color attach="background" args={['#b8d6ff']} />
-      <fog attach="fog" args={['#b8d6ff', 28, 95]} />
+      <color attach="background" args={[env.skyColor]} />
+      <fog attach="fog" args={[env.fogColor, env.fogNear, env.fogFar]} />
 
       <Sky
         distance={450000}
-        sunPosition={[12, 8, -4]}
+        sunPosition={env.sunPosition}
         inclination={0.48}
         azimuth={0.19}
-        rayleigh={1.2}
-        turbidity={8}
+        rayleigh={env.rayleigh}
+        turbidity={env.turbidity}
         mieCoefficient={0.006}
         mieDirectionalG={0.85}
       />
 
-      <ambientLight intensity={0.45} />
+      <ambientLight intensity={env.ambientIntensity} />
       <hemisphereLight args={['#ffffff', '#7ea05f', 0.48]} />
       <directionalLight
         position={[10, 14, 7]}
-        intensity={1.08}
+        intensity={env.sunIntensity}
         castShadow
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
@@ -227,27 +258,18 @@ export const SceneCanvas = ({
         shadow-camera-top={14}
         shadow-camera-bottom={-14}
       />
-      <directionalLight position={[-9, 7, -8]} intensity={0.35} color="#d7e7ff" />
+      <directionalLight position={[-9, 7, -8]} intensity={env.sunIntensity * 0.32} color="#d7e7ff" />
 
       <Suspense fallback={null}>
         {mode === 'sample' ? (
-          <SamplePergola
-            dimensions={dimensions}
-            materialPreset={materialPreset}
-            texture={frameTexture}
-          />
+          <SamplePergola dimensions={dimensions} materialPreset={materialPreset} texture={frameTexture} />
         ) : (
-          <ParametricPergola
-            dimensions={dimensions}
-            parameters={parameters}
-            materialPreset={materialPreset}
-            texture={frameTexture}
-            buildOptions={buildOptions}
-          />
+          <ParametricPergola dimensions={dimensions} parameters={parameters} materialPreset={materialPreset} texture={frameTexture} buildOptions={buildOptions} />
         )}
 
         <DimensionLabels dimensions={dimensions} visible={showDimensions} />
-        <Ground texture={grassTexture} />
+        {metrics && <PartHotspots metrics={metrics} visible={showHotspots} height={dimensions.height} />}
+        <Ground texture={grassTexture} color={env.groundColor} />
         <ContactShadows
           key={contactShadowKey}
           position={[0, 0.015, 0]}
@@ -262,7 +284,12 @@ export const SceneCanvas = ({
         />
       </Suspense>
 
-      <CameraFit dimensions={dimensions} controlsRef={controlsRef} viewPreset={viewPreset} />
+      <CameraFit
+        dimensions={dimensions}
+        controlsRef={controlsRef}
+        viewPreset={viewPreset}
+        useSmoothTransition={hasInteracted.current}
+      />
       {captureRef ? (
         <CaptureBridge captureRef={captureRef} controlsRef={controlsRef} dimensions={dimensions} />
       ) : null}
@@ -274,6 +301,9 @@ export const SceneCanvas = ({
         dampingFactor={0.09}
         minPolarAngle={0.05}
         maxPolarAngle={Math.PI / 2.05}
+        autoRotate={autoRotate}
+        autoRotateSpeed={0.8}
+        onChange={() => { hasInteracted.current = true; }}
       />
     </Canvas>
   );

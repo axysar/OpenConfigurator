@@ -15,6 +15,7 @@ import {
   trackViewPresetChanged,
   trackRuleTriggered,
   LeadCaptureForm,
+  SceneA11y,
 } from '@core/index';
 import {
   fmtArea,
@@ -64,6 +65,10 @@ import {
   type SavedConfig,
 } from './lib/persistence';
 import { PERGOLA_RULES } from './lib/pergolaRules';
+import { SCENE_ENVIRONMENTS } from './lib/sceneEnvironments';
+import { INSPIRATION_GALLERY } from './lib/inspirationGallery';
+import { openSpecSheetPdf } from './lib/pdfSpecSheet';
+import { ComparePanel } from './components/ComparePanel';
 
 const DIMENSION_LIMITS = {
   width: [2.5, 9] as const,
@@ -77,6 +82,7 @@ const STEPS: Array<{ id: string; tKey: string }> = [
   { id: 'structure', tKey: 'pergola.step.structure' },
   { id: 'engineering', tKey: 'pergola.step.engineering' },
   { id: 'quote', tKey: 'pergola.step.quote' },
+  { id: 'review', tKey: 'Review' },
 ];
 
 interface RangeControlProps {
@@ -143,6 +149,10 @@ export default function PergolaTemplate(): JSX.Element {
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [viewPreset, setViewPreset] = useState<ViewPreset>('orbit');
   const [showDimensions, setShowDimensions] = useState(false);
+  const [showHotspots, setShowHotspots] = useState(false);
+  const [autoRotate, setAutoRotate] = useState(false);
+  const [environmentId, setEnvironmentId] = useState('day');
+  const [compareTarget, setCompareTarget] = useState<SavedConfig | null>(null);
   const captureRef = useRef<SceneCaptureHandle | null>(null);
 
   // ----- Rules engine -----
@@ -336,6 +346,28 @@ export default function PergolaTemplate(): JSX.Element {
     window.setTimeout(() => setShareNotice(null), 3200);
   }, [spec]);
 
+  const handleExportPdf = useCallback(() => {
+    trackExport('pdf');
+    const screenshotDataUrl = captureRef.current?.takeScreenshot() ?? null;
+    openSpecSheetPdf({
+      spec,
+      metrics: model.metrics,
+      quote,
+      bom,
+      materialLabel: materialPreset.label,
+      loadScenarioLabel: loadScenario.label,
+      screenshotDataUrl,
+    });
+  }, [spec, model.metrics, quote, bom, materialPreset.label, loadScenario.label]);
+
+  const handleLoadInspiration = useCallback(
+    (inspirationSpec: PergolaSpec) => {
+      history.reset(sanitizePergolaSpec(inspirationSpec));
+      setActiveStep('model');
+    },
+    [history],
+  );
+
   const handleLeadSubmit = useCallback(
     (data: { name: string; email: string; phone: string }) => {
       trackLeadSubmitted(data.phone.length > 0);
@@ -397,6 +429,9 @@ export default function PergolaTemplate(): JSX.Element {
           viewPreset={viewPreset}
           captureRef={captureRef}
           showDimensions={showDimensions}
+          showHotspots={showHotspots}
+          autoRotate={autoRotate}
+          environmentId={environmentId}
         />
 
         <div className="view-controls" role="toolbar" aria-label="Camera view presets">
@@ -421,8 +456,28 @@ export default function PergolaTemplate(): JSX.Element {
           >
             dims
           </button>
+          <button
+            type="button"
+            className={showHotspots ? 'active' : ''}
+            onClick={() => setShowHotspots((prev) => !prev)}
+            aria-pressed={showHotspots}
+            title="Part info hotspots"
+          >
+            info
+          </button>
+          <button
+            type="button"
+            className={autoRotate ? 'active' : ''}
+            onClick={() => setAutoRotate((prev) => !prev)}
+            aria-pressed={autoRotate}
+            title="Auto-rotate"
+          >
+            spin
+          </button>
         </div>
       </div>
+
+      <SceneA11y description={`3D pergola configurator showing a ${spec.dimensions.width.toFixed(1)} by ${spec.dimensions.depth.toFixed(1)} meter pergola, ${spec.dimensions.height.toFixed(1)} meters tall, in ${materialPreset.label} finish. ${model.metrics.postCount} posts, ${model.metrics.slatCount} slats. Estimated weight ${Math.round(model.metrics.estimatedWeightKg)} kilograms. Total estimated price ${Math.round(quote.total)} dollars.`} />
 
       <aside className="panel-wrap" aria-label="Pergola configurator panel">
         <section className="glass-card hero-card panel-header">
@@ -647,6 +702,21 @@ export default function PergolaTemplate(): JSX.Element {
               </span>
             </p>
 
+            <h3>Scene Environment</h3>
+            <div className="env-picker">
+              {SCENE_ENVIRONMENTS.map((env) => (
+                <button
+                  key={env.id}
+                  type="button"
+                  className={environmentId === env.id ? 'active' : ''}
+                  onClick={() => setEnvironmentId(env.id)}
+                  aria-pressed={environmentId === env.id}
+                >
+                  {env.label}
+                </button>
+              ))}
+            </div>
+
             <h3>{t('pergola.engineering.metrics')}</h3>
             <div className="metrics-grid" aria-label="Engineering metrics">
               <div className="metric-highlight">
@@ -707,6 +777,7 @@ export default function PergolaTemplate(): JSX.Element {
               <button type="button" className="oc-icon-btn primary" onClick={handleExportJson} title="Export JSON (⌘E)">⤓ JSON</button>
               <button type="button" className="oc-icon-btn" onClick={handleExportCsv}>⤓ BOM</button>
               <button type="button" className="oc-icon-btn" onClick={handleExportPng}>⤓ PNG</button>
+              <button type="button" className="oc-icon-btn" onClick={handleExportPdf}>⤓ PDF</button>
               <button type="button" className="oc-icon-btn" onClick={handleShareLink} title="Copy share link (⌘K)">↗ Share</button>
             </div>
             {shareNotice && <p className="hint" role="status">{shareNotice}</p>}
@@ -733,6 +804,7 @@ export default function PergolaTemplate(): JSX.Element {
                     </div>
                     <div className="saved-actions">
                       <button type="button" onClick={() => loadSavedConfig(entry)}>Load</button>
+                      <button type="button" onClick={() => setCompareTarget(entry)}>Compare</button>
                       <button type="button" className="danger" onClick={() => deleteSavedConfig(entry.id)}>Del</button>
                     </div>
                   </div>
@@ -741,7 +813,57 @@ export default function PergolaTemplate(): JSX.Element {
             )}
           </section>
         )}
+        {activeStep === 'review' && (
+          <section className="glass-card" aria-labelledby="step-review">
+            <div className="section-head">
+              <span className="section-kicker">Step 6</span>
+              <h2 id="step-review" className="section-title">Review & Finalize</h2>
+            </div>
+
+            <div className="review-grid">
+              <div><span className="review-label">Dimensions</span><strong>{fmtMeters(spec.dimensions.width)} × {fmtMeters(spec.dimensions.depth)} × {fmtMeters(spec.dimensions.height)}</strong></div>
+              <div><span className="review-label">Material</span><strong>{materialPreset.label}</strong></div>
+              <div><span className="review-label">Texture</span><strong>{TEXTURE_LABELS[spec.texturePreset]}</strong></div>
+              <div><span className="review-label">Load Scenario</span><strong>{loadScenario.label}</strong></div>
+              <div><span className="review-label">Posts / Bays</span><strong>{model.metrics.postCount} / {model.metrics.bayCountX}×{model.metrics.bayCountZ}</strong></div>
+              <div><span className="review-label">Weight</span><strong>{fmtWeight(model.metrics.estimatedWeightKg)}</strong></div>
+              <div><span className="review-label">Utilization</span><strong><span className={`tag ${utilizationStatus}`}>{fmtPercent(utilization, 0)}</span></strong></div>
+              <div><span className="review-label">Total Price</span><strong>{fmtCurrency(quote.total)}</strong></div>
+            </div>
+
+            <h3>Inspiration Gallery</h3>
+            <p className="hint">Start from a curated design — click any card to load it.</p>
+            <div className="inspiration-grid">
+              {INSPIRATION_GALLERY.map((item) => (
+                <div
+                  key={item.id}
+                  className="inspiration-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleLoadInspiration(item.spec)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLoadInspiration(item.spec)}
+                >
+                  <strong>{item.title}</strong>
+                  <p>{item.description}</p>
+                  <div className="inspiration-tags">
+                    {item.tags.map((tag) => (
+                      <span key={tag}>{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </aside>
+
+      {compareTarget && (
+        <ComparePanel
+          currentSpec={spec}
+          compareTarget={compareTarget}
+          onClose={() => setCompareTarget(null)}
+        />
+      )}
     </div>
   );
 }
