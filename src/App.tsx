@@ -1,8 +1,11 @@
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
+import { useTheme, useI18n, LoadingScreen, SUPPORTED_LOCALES, type Locale } from '@core/index';
 import { DEFAULT_TEMPLATE_ID, TEMPLATE_REGISTRY, getTemplateById } from './templates/registry';
 
 export default function App(): JSX.Element {
   const [activeTemplateId, setActiveTemplateId] = useState(DEFAULT_TEMPLATE_ID);
+  const { theme, toggleTheme } = useTheme();
+  const { locale, setLocale, t } = useI18n();
 
   const activeTemplate = useMemo(
     () => getTemplateById(activeTemplateId),
@@ -13,31 +16,58 @@ export default function App(): JSX.Element {
 
   return (
     <div className="oc-root">
-      <header className="oc-topbar">
+      <header className="oc-topbar" aria-label="OpenConfigurator chrome">
         <div className="oc-brand">
-          <p className="oc-eyebrow">OpenConfigurator</p>
-          <h1>General 3D Configurator Platform</h1>
+          <p className="oc-eyebrow">{t('shell.brand')}</p>
+          <h1>{t('shell.title')}</h1>
           <p>{activeTemplate.description}</p>
         </div>
 
-        <div className="oc-template-switcher">
-          <label htmlFor="template-select">Template</label>
+        <div className="oc-topbar-actions">
+          <div className="oc-template-switcher">
+            <label htmlFor="template-select">{t('shell.template')}</label>
+            <select
+              id="template-select"
+              value={activeTemplateId}
+              onChange={(event) => setActiveTemplateId(event.target.value)}
+            >
+              {TEMPLATE_REGISTRY.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} ({template.tagline})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <select
-            id="template-select"
-            value={activeTemplateId}
-            onChange={(event) => setActiveTemplateId(event.target.value)}
+            className="oc-locale-select"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+            aria-label="Language"
           >
-            {TEMPLATE_REGISTRY.map((template) => (
-              <option key={template.id} value={template.id}>
-                {template.name} ({template.tagline})
+            {SUPPORTED_LOCALES.map((loc) => (
+              <option key={loc.id} value={loc.id}>
+                {loc.label}
               </option>
             ))}
           </select>
+
+          <button
+            type="button"
+            className="oc-icon-btn"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          >
+            {theme === 'dark' ? t('shell.light') : t('shell.dark')}
+          </button>
         </div>
       </header>
 
       <main className="oc-template-host">
-        <ActiveTemplateComponent />
+        <Suspense fallback={<LoadingScreen />}>
+          <ActiveTemplateComponent />
+        </Suspense>
       </main>
     </div>
   );
